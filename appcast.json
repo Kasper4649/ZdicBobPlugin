@@ -2,6 +2,13 @@
   "identifier": "com.zdic.dictionary",
   "versions": [
     {
+      "version": "1.1.2",
+      "desc": "chore: bump plugin version to 1.1.2",
+      "sha256": "1743931f0736619714b58ee2e06b307ff7174308d5d4af6c4825a140240394a5",
+      "url": "https://github.com/Kasper4649/ZdicBobPlugin/releases/download/v1.1.2/zdic.bobplugin",
+      "minBobVersion": "1.8.0"
+    },
+    {
       "version": "1.1.1",
       "desc": "chore: bump plugin version to 1.1.1",
       "sha256": "6cbe32442a4b808895628c28bc8d2244d664089679d6f00782686a28f23fe0e0",
