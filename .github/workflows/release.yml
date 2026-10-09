@@ -1,0 +1,58 @@
+name: Release Plugin
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/info.json"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Read plugin metadata
+        id: metadata
+        run: |
+          name="$(python3 -c 'import json; print(json.load(open("src/info.json"))["name"])')"
+          version="$(python3 -c 'import json; print(json.load(open("src/info.json"))["version"])')"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Package plugin
+        run: |
+          mkdir -p release
+          zip -j -r "release/${{ steps.metadata.outputs.name }}.bobplugin" ./src/*
+
+      - name: Update appcast
+        id: appcast
+        run: |
+          message="$(git log -1 --pretty=format:%s)"
+          tag="$(python3 scripts/update_appcast.py "$message")"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Upload plugin release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: release/${{ steps.metadata.outputs.name }}.bobplugin
+          asset_name: ${{ steps.metadata.outputs.name }}.bobplugin
+          tag: ${{ steps.appcast.outputs.tag }}
+          overwrite: true
+          body: ${{ github.event.head_commit.message }}
+
+      - name: Commit appcast
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add appcast.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Update appcast for ${{ steps.appcast.outputs.tag }}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi

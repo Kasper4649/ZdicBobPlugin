@@ -1,0 +1,13 @@
+{
+    "identifier": "com.zdict.dictionary",
+    "version": "1.0.0",
+    "category": "translate",
+    "name": "zdict",
+    "summary": "zdict dictionary plugin for Bob",
+    "icon": "icon.png",
+    "author": "Kasper4649",
+    "homepage": "https://github.com/Kasper4649/ZdictBobPlugin",
+    "appcast": "https://raw.githubusercontent.com/Kasper4649/ZdictBobPlugin/main/appcast.json",
+    "minBobVersion": "1.8.0",
+    "options": []
+}
