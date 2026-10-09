@@ -1,8 +1,8 @@
 {
     "identifier": "com.zdic.dictionary",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "category": "translate",
-    "name": "zdic",
+    "name": "汉典",
     "summary": "zdic dictionary plugin for Bob",
     "icon": "icon.png",
     "author": "Kasper4649",
