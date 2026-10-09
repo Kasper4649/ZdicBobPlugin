@@ -1,12 +1,4 @@
 {
-  "identifier": "com.zdict.dictionary",
-  "versions": [
-    {
-      "version": "1.0.0",
-      "desc": "Prepare Zdict Bob plugin release",
-      "sha256": "3b884f055a709adbc371cdefd846dbdf1b5483b36f6f0f3428894ddb91c775ab",
-      "url": "https://github.com/Kasper4649/ZdictBobPlugin/releases/download/v1.0.0/zdict.bobplugin",
-      "minBobVersion": "1.8.0"
-    }
-  ]
+  "identifier": "com.zdic.dictionary",
+  "versions": []
 }

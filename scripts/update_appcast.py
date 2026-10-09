@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 
-REPOSITORY = "Kasper4649/ZdictBobPlugin"
+REPOSITORY = "Kasper4649/ZdicBobPlugin"
 
 
 def update_appcast(message):

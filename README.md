@@ -1,4 +1,4 @@
-# Zdict 汉典词典 Bob 插件
+# ZDIC 汉典词典 Bob 插件
 
 一个为 [Bob](https://bobtranslate.com/) 提供汉典（[zdic.net](https://www.zdic.net/)）词条查询的词典插件。
 
@@ -12,7 +12,7 @@
 ## 安装
 
 1. 安装 Bob 1.8.0 或更高版本。
-2. 前往 [Releases](https://github.com/Kasper4649/ZdictBobPlugin/releases) 下载最新的 `zdict.bobplugin`。
+2. 前往 [Releases](https://github.com/Kasper4649/ZdicBobPlugin/releases) 下载最新的 `zdic.bobplugin`。
 3. 双击下载的文件，按 Bob 提示完成安装。
 
 ## 更新
