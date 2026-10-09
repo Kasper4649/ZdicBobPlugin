@@ -20,15 +20,13 @@ jobs:
       - name: Read plugin metadata
         id: metadata
         run: |
-          name="$(python3 -c 'import json; print(json.load(open("src/info.json"))["name"])')"
           version="$(python3 -c 'import json; print(json.load(open("src/info.json"))["version"])')"
-          echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Package plugin
         run: |
           mkdir -p release
-          zip -j -r "release/${{ steps.metadata.outputs.name }}.bobplugin" ./src/*
+          zip -j -r "release/zdic.bobplugin" ./src/*
 
       - name: Update appcast
         id: appcast
@@ -41,8 +39,8 @@ jobs:
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: release/${{ steps.metadata.outputs.name }}.bobplugin
-          asset_name: ${{ steps.metadata.outputs.name }}.bobplugin
+          file: release/zdic.bobplugin
+          asset_name: zdic.bobplugin
           tag: ${{ steps.appcast.outputs.tag }}
           overwrite: true
           body: ${{ github.event.head_commit.message }}

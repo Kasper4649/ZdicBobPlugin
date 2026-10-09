@@ -5,14 +5,14 @@ from pathlib import Path
 
 
 REPOSITORY = "Kasper4649/ZdicBobPlugin"
+RELEASE_ASSET = "zdic.bobplugin"
 
 
 def update_appcast(message):
     with Path("src/info.json").open(encoding="utf-8") as f:
         info = json.load(f)
     version = info["version"]
-    plugin_name = info["name"]
-    release_file = Path("release") / f"{plugin_name}.bobplugin"
+    release_file = Path("release") / RELEASE_ASSET
     if not release_file.is_file():
         raise FileNotFoundError(f"Release file does not exist: {release_file}")
     with release_file.open("rb") as f:
