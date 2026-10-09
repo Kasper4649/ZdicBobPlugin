@@ -2,6 +2,13 @@
   "identifier": "com.zdic.dictionary",
   "versions": [
     {
+      "version": "1.2.0",
+      "desc": "feat: bump plugin to 1.2.0 and remove phonetics",
+      "sha256": "9b4c94847722cef85c8436603f9d2e3ebc61f9c8e63a077b013b3663b3b36741",
+      "url": "https://github.com/Kasper4649/ZdicBobPlugin/releases/download/v1.2.0/zdic.bobplugin",
+      "minBobVersion": "1.8.0"
+    },
+    {
       "version": "1.1.2",
       "desc": "chore: bump plugin version to 1.1.2",
       "sha256": "1743931f0736619714b58ee2e06b307ff7174308d5d4af6c4825a140240394a5",
