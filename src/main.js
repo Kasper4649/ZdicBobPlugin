@@ -33,8 +33,6 @@ const MAX_QUERY_LENGTH = 30;
 const MAX_MEANS_PER_GROUP = 8; // 每个读音分组最多展示的义项数，其余折叠为“共 N 项”
 const MAX_COMMON_WORDS = 12; // 单字“常用词组”最多展示数
 const MAX_VARIANTS = 8; // 异体字最多展示数
-// Bob 的 phonetics 只有 us / uk 两种类型，界面会显示为“美”。不喜欢可改为 false，拼音仍保留在义项标题中。
-const USE_PHONETICS = true;
 const LANGUAGES = ["auto", "zh-Hans", "zh-Hant"];
 
 // 汉字（含扩展 A 与扩展 B~G 的代理对）
@@ -987,7 +985,6 @@ function parseEntry(html, word, url, noFollow) {
   // —— 以下为锦上添花的信息，只在已有实质内容时追加；任何一项出错都不影响主体结果 ——
   const isSingleChar = Array.from(word).length === 1;
   try {
-    if (USE_PHONETICS && h.pinyin) toDict.phonetics = [{ type: "us", value: h.pinyin }];
     if (h.counterpart) toDict.additions.push({ name: h.counterpartName, value: h.counterpart });
     if (h.variants.length) {
       toDict.additions.push({ name: "异体字", value: h.variants.slice(0, MAX_VARIANTS).join("、") });
