@@ -30,8 +30,11 @@ class KnownError extends Error {
 
 const BASE_URL = "https://zdic.net"; // www.zdic.net 会 301 到此域名
 const MAX_QUERY_LENGTH = 30;
-const CACHE_VERSION = "v8"; // 解析逻辑变更后递增，使旧缓存失效
-const CACHE_TTL_MS = 7 * 24 * 3600 * 1000;
+const MAX_MEANS_PER_GROUP = 8; // 每个读音分组最多展示的义项数，其余折叠为“共 N 项”
+const MAX_COMMON_WORDS = 12; // 单字“常用词组”最多展示数
+const MAX_VARIANTS = 8; // 异体字最多展示数
+// Bob 的 phonetics 只有 us / uk 两种类型，界面会显示为“美”。不喜欢可改为 false，拼音仍保留在义项标题中。
+const USE_PHONETICS = true;
 const LANGUAGES = ["auto", "zh-Hans", "zh-Hant"];
 
 // 汉字（含扩展 A 与扩展 B~G 的代理对）
@@ -100,13 +103,7 @@ function translate(query) {
       }
 
       const order = variantOrder();
-      const cacheKey = makeCacheKey(text, order[0]);
-
-      let entry = readCache(cacheKey);
-      if (!entry) {
-        entry = await lookup(text, order, query);
-        writeCache(cacheKey, entry);
-      }
+      const entry = await lookup(text, order, query);
 
       query.onCompletion({
         result: {
@@ -133,8 +130,11 @@ async function lookup(text, order, query) {
     logInfo(`汉典请求 url: ${url}`);
     try {
       const html = await fetchPage(url, query);
-      const entry = parseEntry(html, text, url);
-      if (entry) return entry;
+      const entry = parseEntry(html, text, url, false);
+      if (entry) {
+        await followAlias(entry, query);
+        return entry;
+      }
       lastNotFound = new KnownError("notFound", "汉典未收录该条目");
     } catch (err) {
       if (err && err.type === "notFound") lastNotFound = err;
@@ -144,8 +144,33 @@ async function lookup(text, order, query) {
   throw lastNotFound || new KnownError("notFound", "汉典未收录该条目");
 }
 
+/**
+ * 异体字条目常常只有一句“同「X」”。这里顺着引用再查一次 X，把它的前几个读音分组附在后面，
+ * 省得用户手动二次查询。失败（含 X 未收录）时静默忽略，保留原条目。
+ */
+async function followAlias(entry, query) {
+  const target = entry && entry.alias;
+  if (!target) return;
+  try {
+    const url = `${BASE_URL}/hans/${encodeURIComponent(target)}`;
+    logInfo(`汉典跟随引用 url: ${url}`);
+    const html = await fetchPage(url, query);
+    const ref = parseEntry(html, target, url, true);
+    if (!ref || !ref.toDict.parts.length) return;
+    ref.toDict.parts.slice(0, 3).forEach((p) => {
+      entry.toDict.parts.push({
+        part: `「${target}」${p.part && p.part !== "释义" ? " " + p.part : ""}`,
+        means: p.means,
+      });
+    });
+  } catch (err) {
+    if (err && err.cancelled) throw err;
+    logError(`跟随引用失败: ${err && (err.message || err)}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
-// 缓存 / 日志
+// 日志
 // ---------------------------------------------------------------------------
 
 function logInfo(msg) {
@@ -154,41 +179,6 @@ function logInfo(msg) {
 
 function logError(msg) {
   if (typeof $log !== "undefined" && $log && $log.error) $log.error(msg);
-}
-
-function hasCache() {
-  return (
-    typeof $cache !== "undefined" &&
-    $cache &&
-    typeof $cache.get === "function" &&
-    typeof $cache.set === "function"
-  );
-}
-
-function makeCacheKey(text, variant) {
-  return `zdic:${CACHE_VERSION}:${variant}:${text}`;
-}
-
-function readCache(key) {
-  if (!hasCache()) return null;
-  try {
-    const raw = $cache.get(key);
-    if (!raw) return null;
-    const obj = JSON.parse(raw);
-    if (!obj || !obj.data || Date.now() - obj.t > CACHE_TTL_MS) return null;
-    return obj.data;
-  } catch (e) {
-    return null;
-  }
-}
-
-function writeCache(key, data) {
-  if (!hasCache()) return;
-  try {
-    $cache.set(key, JSON.stringify({ t: Date.now(), data: data }));
-  } catch (e) {
-    // 缓存失败不影响主流程
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -505,9 +495,10 @@ const SEARCH_MENU_WORDS = /^(笔顺|筆順|五笔|五筆|仓颉|倉頡|四角|Un
  * 解析页首信息：拼音、注音、部首、笔画、结构、异体字。
  *
  * @param {string} headerHtml 第一个分区标题之前的 HTML。
+ * @param {string} word 查询词（用于校验繁简对应字与异体字）。
  * @return {Object} 头部信息。
  */
-function parseHeader(headerHtml) {
+function parseHeader(headerHtml, word) {
   const text = htmlToLines(headerHtml).map(clean).join("\n");
   const pick = (re) => {
     const v = lastCapture(re, text);
@@ -522,16 +513,45 @@ function parseHeader(headerHtml) {
     structure: pick(/(?:字形结构|字形結構)[ \t]*\n?([^\n]*?)(?:字形分析|\n|$)/g),
     unicode: pick(/(?:统一码|統一碼)[ \t]*\n?([^\n]*?)(?:笔顺|筆順|\n|$)/g),
     variants: [],
+    counterpart: "",
+    counterpartName: "",
   };
+
+  const wordLen = Array.from(word || "").length;
+  const isForm = (v) =>
+    !!v && Array.from(v).length === wordLen && Array.from(v).every((c) => HAN_RE.test(c));
+
+  // 繁简对应字：词语页是 <a title="繁体字形">，单字页是“繁体 / 简体”标题后紧跟的链接
+  let m = /<a\b[^>]*\btitle="(繁[体體]字形|[简簡][体體]字形)"[^>]*>([\s\S]*?)<\/a>/.exec(headerHtml);
+  let counterpart = m ? stripTags(m[2]).trim() : "";
+  let name = m ? m[1] : "";
+  if (!isForm(counterpart) || counterpart === word) {
+    counterpart = "";
+    // 页面导航里也有“繁體”字样，后面的链接不一定是对应字，所以逐个匹配，取第一个通过校验的
+    const re = /(繁[体體]|[简簡][体體])(?!字形)[：:\s]*(?:<[^>]*>\s*)*?<a\b[^>]*\btitle="([^"]+)"/g;
+    while ((m = re.exec(headerHtml))) {
+      const c = decodeEntities(m[2]).trim();
+      if (isForm(c) && c !== word) {
+        counterpart = c;
+        name = m[1];
+        break;
+      }
+    }
+  }
+  if (isForm(counterpart) && counterpart !== word) {
+    info.counterpart = counterpart;
+    info.counterpartName = /^繁/.test(name) ? "繁体" : "简体";
+  }
 
   const idx = headerHtml.search(/异体|異體/);
   if (idx >= 0) {
     const tail = headerHtml.slice(idx);
     const titleRe = /title="([^"]+)"/g;
-    let m;
     while ((m = titleRe.exec(tail))) {
       const v = decodeEntities(m[1]).trim();
-      if (v && info.variants.indexOf(v) === -1) info.variants.push(v);
+      if (isForm(v) && v !== word && v !== info.counterpart && info.variants.indexOf(v) === -1) {
+        info.variants.push(v);
+      }
     }
   }
   return info;
@@ -683,10 +703,11 @@ function parseDefinitions(lines) {
   const groups = [];
   const english = [];
   let cur = null;
+  let lastIdx = -1; // 最近一条新增义项的下标；“英文”行对应它
 
   const ensureGroup = () => {
     if (!cur) {
-      cur = { part: "释义", means: [] };
+      cur = { part: "释义", means: [], glosses: {} };
       groups.push(cur);
     }
     return cur;
@@ -699,20 +720,38 @@ function parseDefinitions(lines) {
     const group = /^[●◎]\s*(.+)$/.exec(line);
     if (group) {
       const label = prettifyLabel(group[1]).trim();
-      cur = { part: label || "释义", means: [] };
+      cur = { part: label || "释义", means: [], glosses: {} };
       groups.push(cur);
+      lastIdx = -1;
       continue;
     }
 
     if (parseIndex(line)) {
       const g = ensureGroup();
+      const before = g.means.length;
       splitMeaningItems(line).forEach((it) => pushUniqueMeaning(g.means, it.label, it.body));
+      lastIdx = g.means.length > before ? g.means.length - 1 : -1;
       continue;
     }
 
     const en = /^英文\s*(.+)$/.exec(line);
-    if (en) english.push(en[1]);
+    if (en) {
+      const gloss = en[1].trim();
+      if (cur && lastIdx >= 0) {
+        const list = (cur.glosses[lastIdx] = cur.glosses[lastIdx] || []);
+        if (list.indexOf(gloss) === -1) list.push(gloss);
+      } else if (english.indexOf(gloss) === -1) {
+        english.push(gloss);
+      }
+    }
   }
+
+  // 把英文释义并入各自的义项：“1. 释义 [gloss]”
+  groups.forEach((g) => {
+    Object.keys(g.glosses || {}).forEach((k) => {
+      g.means[k] = `${g.means[k]} [${g.glosses[k].join("; ")}]`;
+    });
+  });
   return { groups: groups.filter((g) => g.means.length > 0), english };
 }
 
@@ -790,15 +829,68 @@ function parseTranslations(lines) {
 }
 
 /**
+ * 单字页“详细解释”里的“常用词组”链接列表（只取第一组，最多 MAX_COMMON_WORDS 个）。
+ */
+function parseCommonWords(htmls) {
+  const html = (htmls || []).join("\n");
+  const m = /常用[词詞][组組]/.exec(html);
+  if (!m) return [];
+  let seg = html.slice(m.index + m[0].length, m.index + m[0].length + 20000);
+  const stop = seg.search(/显示更多|顯示更多|[◎●]|<h[1-6]\b/);
+  if (stop >= 0) seg = seg.slice(0, stop);
+
+  const words = [];
+  const re = /<a\b[^>]*>([\s\S]*?)<\/a>/g;
+  let x;
+  while ((x = re.exec(seg)) && words.length < MAX_COMMON_WORDS) {
+    const t = stripTags(x[1]).trim();
+    if (Array.from(t).length >= 2 && Array.from(t).every((c) => HAN_RE.test(c)) && words.indexOf(t) === -1) {
+      words.push(t);
+    }
+  }
+  return words;
+}
+
+/**
+ * 从国语辞典里取第一条“真正的句子”用例（含逗号/句号的「…」）。单字的用例多是词语列表，不取。
+ */
+function parseGuoyuExample(lines) {
+  for (const raw of lines || []) {
+    const line = stripZhuyin(clean(raw));
+    const m = /(?:例如|例句|如)\s*[：:]\s*(「[^」]*[，。！？][^」]*」)/.exec(line);
+    if (!m) continue;
+    const text = m[1]
+      .replace(/\s+(?=[\u3400-\u9fff「」『』，。！？、；：])/g, "")
+      .replace(/([\u3400-\u9fff」』，。！？、；：])\s+/g, "$1");
+    return truncate(text, 100);
+  }
+  return "";
+}
+
+/**
+ * 识别“同「X」”式的异体字引用，返回 X；不是纯引用则返回空串。
+ */
+function detectAlias(defs, word) {
+  if (defs.groups.length !== 1 || defs.groups[0].means.length !== 1) return "";
+  const m = /^(?:\d+\s*[.．、]\s*|[(（]\s*\d+\s*[)）]\s*)?同\s*[“"「『]([^”"」』]{1,4})[”"」』]\s*[。.]?(?:\s*\[[^\]]*\])?$/.exec(
+    defs.groups[0].means[0]
+  );
+  if (!m) return "";
+  const t = m[1].trim();
+  return t && t !== word && Array.from(t).every((c) => HAN_RE.test(c)) ? t : "";
+}
+
+/**
  * 解析整页，生成 Bob 的 toDict 结构。
  * 各分区按需转换成文本行（htmlToLines 较耗时，康熙字典、百科等大分区默认不处理）。
  *
  * @param {string} html 页面 HTML。
  * @param {string} word 查询词。
  * @param {string} url 页面地址。
+ * @param {boolean} noFollow 为 true 时不识别“同「X」”引用（防止递归）。
  * @return {?{summary: string, toDict: Object}} 解析结果；无内容时返回 null。
  */
-function parseEntry(html, word, url) {
+function parseEntry(html, word, url, noFollow) {
   const sections = splitSections(html);
   if (sections.length === 0) {
     logInfo("汉典页面未找到任何已知分区（词条不存在，或页面结构已变更）");
@@ -832,24 +924,42 @@ function parseEntry(html, word, url) {
   const getHeader = () => {
     if (!header) {
       const firstStart = Math.min.apply(null, sections.map((s) => s.start));
-      header = parseHeader(html.slice(0, firstStart));
+      header = parseHeader(html.slice(0, firstStart), word);
     }
     return header;
   };
+  let h = { pinyin: "", variants: [], counterpart: "", counterpartName: "" };
+  try {
+    h = getHeader();
+  } catch (e) {
+    logError(`解析页首失败: ${e && (e.message || e)}`);
+  }
 
-  // 词语解释的读音标签只保留拼音（词本身已在标题中显示，避免重复）
+  // 读音标签只保留拼音（词本身已在标题中显示）；繁简对应字单独成行，标签里的“（點）”随之去掉
   const singleGroup = defs.groups.length === 1;
   defs.groups.forEach((g) => {
     let part = g.part;
     if (singleGroup && (!htmlOf.basic || part === "释义")) {
-      const h = getHeader();
       if (h.pinyin) part = h.pinyin;
     }
-    toDict.parts.push({ part: dropLeadingWord(stripZhuyin(part), word), means: g.means });
+    part = dropLeadingWord(stripZhuyin(part), word);
+    if (h.counterpart) {
+      const stripped = part
+        .replace(/\s*[（(]\s*([^）)]+?)\s*[）)]/g, (m0, c) =>
+          c.replace(/^(?:繁[体體]|[简簡][体體])字?\s*/, "").trim() === h.counterpart ? "" : m0
+        )
+        .trim();
+      if (stripped) part = stripped;
+    }
+    const means =
+      g.means.length > MAX_MEANS_PER_GROUP
+        ? g.means.slice(0, MAX_MEANS_PER_GROUP).concat([`…（共 ${g.means.length} 项）`])
+        : g.means;
+    toDict.parts.push({ part, means });
   });
 
-  // 英文释义（如 日本 → Japan）
-  defs.english.forEach((en) => toDict.additions.push({ name: "英文", value: en }));
+  // 无法挂到具体义项上的英文释义（如 日本 → Japan）
+  if (defs.english.length) toDict.additions.push({ name: "英文", value: defs.english.join("；") });
 
   // —— 近义词 / 反义词 ——
   if (htmlOf.syn) {
@@ -874,8 +984,25 @@ function parseEntry(html, word, url) {
   // 没有任何实质内容（既无释义、成语，也无国语辞典等）视为未找到
   if (toDict.parts.length === 0 && toDict.additions.length === 0) return null;
 
-  // —— 页首信息（懒解析：仅在没有任何释义时用于摘要兜底）——
-  if (!defs.groups.length && !idiom.length && !guoyuText) getHeader();
+  // —— 以下为锦上添花的信息，只在已有实质内容时追加；任何一项出错都不影响主体结果 ——
+  const isSingleChar = Array.from(word).length === 1;
+  try {
+    if (USE_PHONETICS && h.pinyin) toDict.phonetics = [{ type: "us", value: h.pinyin }];
+    if (h.counterpart) toDict.additions.push({ name: h.counterpartName, value: h.counterpart });
+    if (h.variants.length) {
+      toDict.additions.push({ name: "异体字", value: h.variants.slice(0, MAX_VARIANTS).join("、") });
+    }
+    if (!isSingleChar && htmlOf.guoyu && !guoyuText) {
+      const ex = parseGuoyuExample(linesOf("guoyu"));
+      if (ex) toDict.additions.push({ name: "例句", value: ex });
+    }
+    if (isSingleChar && htmlOf.detail) {
+      const words = parseCommonWords(htmlOf.detail);
+      if (words.length) toDict.exchanges.push({ name: "常用词组", words });
+    }
+  } catch (e) {
+    logError(`解析附加信息失败: ${e && (e.message || e)}`);
+  }
 
   // —— 摘要 ——
   let summary = "";
@@ -885,7 +1012,12 @@ function parseEntry(html, word, url) {
   else summary = (header && header.pinyin) || word;
   summary = truncate(summary, 120);
 
-  return { summary, toDict };
+  const result = { summary, toDict };
+  if (!noFollow) {
+    const alias = detectAlias(defs, word);
+    if (alias) result.alias = alias;
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
