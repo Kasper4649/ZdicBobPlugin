@@ -1,4 +1,12 @@
 {
   "identifier": "com.zdic.dictionary",
-  "versions": []
+  "versions": [
+    {
+      "version": "1.0.0",
+      "desc": "Rename plugin branding to zdic",
+      "sha256": "b8c78d7f509cf100be2f482c9b7dcce29394feb3908ef257768f18f8bdc74c9a",
+      "url": "https://github.com/Kasper4649/ZdicBobPlugin/releases/download/v1.0.0/zdic.bobplugin",
+      "minBobVersion": "1.8.0"
+    }
+  ]
 }
