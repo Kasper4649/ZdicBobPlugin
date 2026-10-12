@@ -17,4 +17,9 @@
 
 ## 更新
 
-在 Bob 中启用插件更新检查后，可通过本仓库的 appcast 获取后续发布版本。首次发布前，appcast 中没有可供更新的版本。
+在 Bob 中启用插件更新检查后，可通过本仓库的 appcast 获取后续发布版本。
+
+## 致谢
+
+- 感谢 [MOJiBobPlugin](https://github.com/Ukenn2112/MOJiBobPlugin)，基本都按照其结构和实现方式来开发。
+- 感谢 Claude 和 Copilot 进行代码编写和优化。
