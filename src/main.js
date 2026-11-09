@@ -35,6 +35,24 @@ const MAX_COMMON_WORDS = 12; // 单字“常用词组”最多展示数
 const MAX_VARIANTS = 8; // 异体字最多展示数
 const LANGUAGES = ["auto", "zh-Hans", "zh-Hant"];
 
+// 网络预算：Bob 会在 pluginTimeoutInterval 秒后中断查询，所以请求要自己控时。
+// 最坏情况（重试一次 + 跟随一次引用）也必须落在上限之内。
+const TIMEOUT_INTERVAL = 30;
+const REQUEST_TIMEOUT = 15; // 单次请求上限（秒）
+const RETRY_BUDGET = 16; // 已耗时超过该值（秒）就不再重试
+const ALIAS_BUDGET = 20; // 已耗时超过该值（秒）就不再跟随“同「X」”引用
+
+let requestStartAt = 0; // 本次查询的开始时间（毫秒），用于计算剩余预算
+
+/**
+ * 本次查询已耗时（秒）。
+ *
+ * @return {number} 秒数。
+ */
+function elapsed() {
+  return (Date.now() - requestStartAt) / 1000;
+}
+
 // 汉字（含扩展 A 与扩展 B~G 的代理对）
 const HAN_RE = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]|[\ud840-\ud884][\udc00-\udfff]/;
 
@@ -53,7 +71,7 @@ function supportLanguages() {
  * @return {number} 超时时间，单位为秒。
  */
 function pluginTimeoutInterval() {
-  return 30;
+  return TIMEOUT_INTERVAL;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,6 +92,8 @@ function pluginTimeoutInterval() {
 function translate(query) {
   (async () => {
     try {
+      requestStartAt = Date.now();
+
       const text = normalizeQuery(query.text);
       if (!text) {
         throw new KnownError("param", "查询内容为空");
@@ -85,14 +105,17 @@ function translate(query) {
           "请只选中一个词条后重试"
         );
       }
-      if (!HAN_RE.test(text)) {
+      // 必须整串都是汉字。夹带字母或标点的文本（如 “abc好”“好，坏”）汉典必然查不到，
+      // 与其发两次请求再报“未收录”，不如这里直接说明。
+      const chars = Array.from(text);
+      if (!chars.every((c) => HAN_RE.test(c))) {
         throw new KnownError(
           "unsupportedLanguage",
           "汉典仅支持汉字词条",
           "请选中汉字、词语或成语后重试"
         );
       }
-      if (Array.from(text).length > MAX_QUERY_LENGTH) {
+      if (chars.length > MAX_QUERY_LENGTH) {
         throw new KnownError(
           "param",
           "汉典仅支持查询单字、词语或成语",
@@ -128,7 +151,7 @@ async function lookup(text, order, query) {
     logInfo(`汉典请求 url: ${url}`);
     try {
       const html = await fetchPage(url, query);
-      const entry = parseEntry(html, text, url, false);
+      const entry = parseEntry(html, text, false);
       if (entry) {
         await followAlias(entry, query);
         return entry;
@@ -145,22 +168,37 @@ async function lookup(text, order, query) {
 /**
  * 异体字条目常常只有一句“同「X」”。这里顺着引用再查一次 X，把它的前几个读音分组附在后面，
  * 省得用户手动二次查询。失败（含 X 未收录）时静默忽略，保留原条目。
+ *
+ * 与主查询同样按 hans → hant 顺序尝试，避免繁体异体字的引用目标只在繁体页存在。
+ * 剩余时间不足时直接跳过，防止超出 Bob 的超时上限。
  */
 async function followAlias(entry, query) {
   const target = entry && entry.alias;
   if (!target) return;
+  if (elapsed() > ALIAS_BUDGET) {
+    logInfo("剩余时间不足，跳过跟随引用");
+    return;
+  }
   try {
-    const url = `${BASE_URL}/hans/${encodeURIComponent(target)}`;
-    logInfo(`汉典跟随引用 url: ${url}`);
-    const html = await fetchPage(url, query);
-    const ref = parseEntry(html, target, url, true);
-    if (!ref || !ref.toDict.parts.length) return;
-    ref.toDict.parts.slice(0, 3).forEach((p) => {
-      entry.toDict.parts.push({
-        part: `「${target}」${p.part && p.part !== "释义" ? " " + p.part : ""}`,
-        means: p.means,
+    for (const variant of variantOrder()) {
+      const url = `${BASE_URL}/${variant}/${encodeURIComponent(target)}`;
+      logInfo(`汉典跟随引用 url: ${url}`);
+      let ref = null;
+      try {
+        ref = parseEntry(await fetchPage(url, query), target, true);
+      } catch (err) {
+        if (err && err.cancelled) throw err;
+        if (!err || err.type !== "notFound") throw err;
+      }
+      if (!ref || !ref.toDict.parts.length) continue;
+      ref.toDict.parts.slice(0, 3).forEach((p) => {
+        entry.toDict.parts.push({
+          part: `「${target}」${p.part && p.part !== "释义" ? " " + p.part : ""}`,
+          means: p.means,
+        });
       });
-    });
+      return;
+    }
   } catch (err) {
     if (err && err.cancelled) throw err;
     logError(`跟随引用失败: ${err && (err.message || err)}`);
@@ -226,6 +264,8 @@ function isCancelled(error) {
 async function fetchPage(url, query) {
   let lastErr = null;
   for (let attempt = 0; attempt < 2; attempt++) {
+    // 按剩余预算收紧超时；至少留 3 秒，避免预算用尽后请求立刻被掐断
+    const remaining = TIMEOUT_INTERVAL - elapsed() - 2;
     const resp = await $http.request({
       method: "GET",
       url,
@@ -235,7 +275,7 @@ async function fetchPage(url, query) {
         Accept: "text/html,application/xhtml+xml",
         "Accept-Language": "zh-CN,zh;q=0.9",
       },
-      timeout: 15,
+      timeout: Math.max(3, Math.min(REQUEST_TIMEOUT, Math.ceil(remaining))),
       cancelSignal: query.cancelSignal,
     });
 
@@ -250,7 +290,8 @@ async function fetchPage(url, query) {
         `请求汉典失败 - ${resp.error.localizedDescription || "未知错误"}`,
         resp.error.localizedFailureReason
       );
-      continue;
+      if (attempt === 0 && elapsed() < RETRY_BUDGET) continue;
+      break;
     }
 
     const status = resp.response && resp.response.statusCode;
@@ -259,7 +300,8 @@ async function fetchPage(url, query) {
     }
     if (status && status >= 500) {
       lastErr = new KnownError("api", `汉典返回异常状态码 ${status}`);
-      continue;
+      if (attempt === 0 && elapsed() < RETRY_BUDGET) continue;
+      break;
     }
     if (status && status >= 400) {
       throw new KnownError("api", `汉典返回异常状态码 ${status}`);
@@ -884,11 +926,10 @@ function detectAlias(defs, word) {
  *
  * @param {string} html 页面 HTML。
  * @param {string} word 查询词。
- * @param {string} url 页面地址。
  * @param {boolean} noFollow 为 true 时不识别“同「X」”引用（防止递归）。
  * @return {?{summary: string, toDict: Object}} 解析结果；无内容时返回 null。
  */
-function parseEntry(html, word, url, noFollow) {
+function parseEntry(html, word, noFollow) {
   const sections = splitSections(html);
   if (sections.length === 0) {
     logInfo("汉典页面未找到任何已知分区（词条不存在，或页面结构已变更）");
