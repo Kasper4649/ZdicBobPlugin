@@ -3,8 +3,8 @@
   "versions": [
     {
       "version": "1.2.1",
-      "desc": "fix: 收紧查询校验与网络预算，别名跟随支持繁体回退",
-      "sha256": "d74fa7f5e8708f17cbef7e4bf89b78b312fdf71ebeb566f341b9ee634a408c84",
+      "desc": "chore: release v1.2.1",
+      "sha256": "e8994658bd7552d33d567b43ba3d8b72eee83a7c49682d93616248a657ab9baf",
       "url": "https://github.com/Kasper4649/ZdicBobPlugin/releases/download/v1.2.1/zdic.bobplugin",
       "minBobVersion": "1.8.0"
     },
