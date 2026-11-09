@@ -2,6 +2,13 @@
   "identifier": "com.zdic.dictionary",
   "versions": [
     {
+      "version": "1.2.1",
+      "desc": "fix: 收紧查询校验与网络预算，别名跟随支持繁体回退",
+      "sha256": "d74fa7f5e8708f17cbef7e4bf89b78b312fdf71ebeb566f341b9ee634a408c84",
+      "url": "https://github.com/Kasper4649/ZdicBobPlugin/releases/download/v1.2.1/zdic.bobplugin",
+      "minBobVersion": "1.8.0"
+    },
+    {
       "version": "1.2.0",
       "desc": "feat: bump plugin to 1.2.0 and remove phonetics",
       "sha256": "9b4c94847722cef85c8436603f9d2e3ebc61f9c8e63a077b013b3663b3b36741",
